@@ -1,0 +1,7 @@
+/vendor/
+.env
+/var/
+/storage/
+public/.user.ini
+*.sql
+!sql/*.sql

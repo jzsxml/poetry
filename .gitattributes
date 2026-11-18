@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.php text eol=lf
+*.{css,js,sql,md,svg,json,htaccess} text eol=lf

@@ -1,0 +1,21 @@
+.result-list--loading {
+  opacity: 0.94;
+  pointer-events: none;
+}
+
+.pager--loading .pager__info {
+  color: var(--accent);
+}
+
+.pager__progress {
+  flex: 1 1 100%;
+  height: 3px;
+  margin: 0.15rem 0 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(44, 36, 22, 0.08);
+}
+
+.pager__progress .search-panel__progress-bar {
+  width: 38%;
+}
