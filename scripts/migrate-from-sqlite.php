@@ -16,6 +16,7 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Poetry\AuthorWallStats;
 use Poetry\Config;
+use Poetry\DatabaseBulk;
 use Poetry\WorkRandomPool;
 
 Config::load(dirname(__DIR__) . '/.env');
@@ -65,86 +66,6 @@ $mysql->exec('TRUNCATE TABLE authors');
 $mysql->exec('SET SESSION foreign_key_checks=1');
 $mysql->exec('SET SESSION unique_checks=1');
 
-/** @param list<array<int, mixed>> $rows */
-function flushWorkBatch(PDO $mysql, array $rows): void
-{
-    if ($rows === []) {
-        return;
-    }
-    $cols =
-        'id, corpus, kind, author, title, rhythmic, paragraphs, notes, body, source_file, source_index';
-    $tuple = '(?,?,?,?,?,?,?,?,?,?,?)';
-    $parts = array_fill(0, count($rows), $tuple);
-    $flat = [];
-    foreach ($rows as $r) {
-        array_push($flat, ...$r);
-    }
-    $sql = 'INSERT INTO works (' . $cols . ') VALUES ' . implode(',', $parts);
-    $mysql->prepare($sql)->execute($flat);
-}
-
-/**
- * 同一批内按 (kind,name) 去重，避免多值 INSERT 主键重复。
- *
- * @param list<array{0: string, 1: string, 2: string}> $rows
- *
- * @return list<array{0: string, 1: string, 2: string}>
- */
-function dedupeAuthorBatch(array $rows): array
-{
-    /** @var array<string, array{0: string, 1: string, 2: string}> */
-    $map = [];
-    foreach ($rows as $r) {
-        $key = $r[1] . "\0" . $r[0];
-        if (!isset($map[$key]) || strlen($r[2]) > strlen($map[$key][2])) {
-            $map[$key] = $r;
-        }
-    }
-
-    return array_values($map);
-}
-
-/** @param list<array{0: string, 1: string, 2: string}> $rows */
-function flushAuthorBatch(PDO $mysql, array $rows): void
-{
-    $rows = dedupeAuthorBatch($rows);
-    if ($rows === []) {
-        return;
-    }
-    $sql = <<<'SQL'
-INSERT INTO authors (name, kind, description) VALUES (?,?,?)
-ON DUPLICATE KEY UPDATE
-  description = IF(
-    CHAR_LENGTH(VALUES(description)) > CHAR_LENGTH(description),
-    VALUES(description),
-    description
-  )
-SQL;
-    $st = $mysql->prepare($sql);
-    foreach ($rows as $r) {
-        $st->execute([$r[0], $r[1], $r[2]]);
-    }
-}
-
-function workBodyFromParagraphs(string $paragraphsJson): string
-{
-    $paras = json_decode($paragraphsJson, true);
-    if (!is_array($paras)) {
-        return '';
-    }
-
-    return \Poetry\WorkParagraphs::bodyFromLines(\Poetry\WorkParagraphs::flattenList($paras));
-}
-
-function truncateBody(string $body, int $max): string
-{
-    if ($max <= 0 || strlen($body) <= $max) {
-        return $body;
-    }
-
-    return mb_substr($body, 0, $max, 'UTF-8');
-}
-
 // 只读 works 表，避免扫虚拟表 works_fts（大库极慢）
 $sqlite->exec('PRAGMA query_only = ON');
 $works = $sqlite->query('SELECT * FROM works');
@@ -155,8 +76,8 @@ $sinceCommit = 0;
 $mysql->beginTransaction();
 
 while ($row = $works->fetch(PDO::FETCH_ASSOC)) {
-    $body = workBodyFromParagraphs((string) $row['paragraphs']);
-    $body = truncateBody($body, $bodyMax);
+    $body = DatabaseBulk::workBodyFromParagraphsJson((string) $row['paragraphs']);
+    $body = DatabaseBulk::truncateBody($body, $bodyMax);
 
     $batch[] = [
         $row['id'],
@@ -175,7 +96,7 @@ while ($row = $works->fetch(PDO::FETCH_ASSOC)) {
 
     if (count($batch) >= $rowsPerInsert) {
         $n = count($batch);
-        flushWorkBatch($mysql, $batch);
+        DatabaseBulk::flushWorkBatch($mysql, $batch);
         $batch = [];
         $sinceCommit += $n;
 
@@ -190,7 +111,7 @@ while ($row = $works->fetch(PDO::FETCH_ASSOC)) {
 }
 
 if ($batch !== []) {
-    flushWorkBatch($mysql, $batch);
+    DatabaseBulk::flushWorkBatch($mysql, $batch);
 }
 $mysql->commit();
 
@@ -211,12 +132,12 @@ while ($a = $authors->fetch(PDO::FETCH_ASSOC)) {
     $ab[] = [$a['name'], $a['kind'], $a['description']];
     $ac++;
     if (count($ab) >= $authorChunk) {
-        flushAuthorBatch($mysql, $ab);
+        DatabaseBulk::flushAuthorBatch($mysql, $ab);
         $ab = [];
     }
 }
 if ($ab !== []) {
-    flushAuthorBatch($mysql, $ab);
+    DatabaseBulk::flushAuthorBatch($mysql, $ab);
 }
 $mysql->commit();
 echo "作者迁入: {$ac}\n";

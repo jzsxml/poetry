@@ -26,7 +26,7 @@ View::layoutStart(Site::TITLE, ['/assets/search-highlight.js', '/assets/author-w
 
 <?php if (!$dbReady): ?>
   <div class="banner-warn">
-    数据库未就绪。请配置 MySQL 并执行 <code>composer run migrate</code>。
+    数据库未就绪。请配置 MySQL 并执行 <code>composer run import</code>。
   </div>
 <?php endif; ?>
 

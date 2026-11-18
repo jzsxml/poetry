@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 /**
  * 修复导入时 String(对象) 导致的 "[object Object]" 正文。
- * 按 source_file + source_index 从 data/ 重新归一化 paragraphs 与 body。
+ * 按 source_file + source_index 从 POETRY_DATA_PATH 重新归一化 paragraphs 与 body。
  */
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Poetry\Config;
 use Poetry\Database;
+use Poetry\PoemJson;
 use Poetry\WorkParagraphs;
 
 Config::load(dirname(__DIR__) . '/.env');
@@ -19,7 +20,7 @@ if (!Database::available()) {
     exit(1);
 }
 
-$dataRoot = dirname(__DIR__, 2) . '/data';
+$dataRoot = Config::resolveDataPath();
 if (!is_dir($dataRoot)) {
     fwrite(STDERR, "Missing data root: {$dataRoot}\n");
     exit(1);
@@ -36,76 +37,6 @@ if ($rows === []) {
     exit(0);
 }
 
-/**
- * @return list<array<string, mixed>>
- */
-function flattenPoemCandidates(mixed $data): array
-{
-    $out = [];
-    $isPoemLike = static function (array $o): bool {
-        if (isset($o['paragraphs']) && is_array($o['paragraphs']) && $o['paragraphs'] !== []) {
-            return true;
-        }
-        if (isset($o['para']) && is_array($o['para']) && $o['para'] !== []) {
-            return true;
-        }
-        if (isset($o['content']) && is_array($o['content']) && $o['content'] !== []
-            && is_string($o['content'][0] ?? null)) {
-            return true;
-        }
-
-        return isset($o['content']) && is_string($o['content']) && trim($o['content']) !== '';
-    };
-    $walk = static function (mixed $node) use (&$walk, &$out, $isPoemLike): void {
-        if (is_array($node)) {
-            if (array_is_list($node)) {
-                foreach ($node as $item) {
-                    $walk($item);
-                }
-
-                return;
-            }
-        }
-        if (!is_array($node)) {
-            return;
-        }
-        if ($isPoemLike($node)) {
-            $out[] = $node;
-
-            return;
-        }
-        if (isset($node['content']) && is_array($node['content'])) {
-            $walk($node['content']);
-        }
-        if (isset($node['chapters']) && is_array($node['chapters'])) {
-            $walk($node['chapters']);
-        }
-    };
-    $walk($data);
-
-    return $out;
-}
-
-/** @param array<string, mixed> $raw */
-function normalizeParagraphs(array $raw): array
-{
-    if (isset($raw['paragraphs']) && is_array($raw['paragraphs'])) {
-        return WorkParagraphs::flattenList($raw['paragraphs']);
-    }
-    if (isset($raw['para']) && is_array($raw['para'])) {
-        return WorkParagraphs::flattenList($raw['para']);
-    }
-    if (isset($raw['content']) && is_array($raw['content'])
-        && is_string($raw['content'][0] ?? null)) {
-        return WorkParagraphs::flattenList($raw['content']);
-    }
-    if (isset($raw['content']) && is_string($raw['content'])) {
-        return [trim($raw['content'])];
-    }
-
-    return [];
-}
-
 /** @var array<string, list<array<string, mixed>>> */
 $cache = [];
 $update = $pdo->prepare(
@@ -116,9 +47,9 @@ $failed = 0;
 
 foreach ($rows as $row) {
     $rel = (string) $row['source_file'];
-    $path = $dataRoot . '/' . str_replace('\\', '/', $rel);
+    $path = $dataRoot . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rel);
     if (!is_file($path)) {
-        $path = $dataRoot . '/' . $row['corpus'] . '/' . basename($rel);
+        $path = $dataRoot . DIRECTORY_SEPARATOR . $row['corpus'] . DIRECTORY_SEPARATOR . basename($rel);
     }
     if (!is_file($path)) {
         fwrite(STDERR, "missing file for {$row['id']}: {$rel}\n");
@@ -127,7 +58,7 @@ foreach ($rows as $row) {
     }
     if (!isset($cache[$path])) {
         try {
-            $cache[$path] = flattenPoemCandidates(
+            $cache[$path] = PoemJson::flattenPoemCandidates(
                 json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR)
             );
         } catch (Throwable $e) {
@@ -142,7 +73,8 @@ foreach ($rows as $row) {
         ++$failed;
         continue;
     }
-    $lines = normalizeParagraphs($item);
+    $norm = PoemJson::normalizePoem($item);
+    $lines = $norm['paragraphs'] ?? [];
     if ($lines === [] || WorkParagraphs::linesCorrupted($lines)) {
         fwrite(STDERR, "still empty/corrupt: {$row['id']}\n");
         ++$failed;

@@ -36,4 +36,23 @@ final class Config
 
         return "mysql:host={$host};port={$port};dbname={$db};charset={$charset}";
     }
+
+    public static function projectRoot(): string
+    {
+        return dirname(__DIR__);
+    }
+
+    /** chinese-poetry 数据目录（默认项目根下 ./data，不纳入 Git） */
+    public static function resolveDataPath(): string
+    {
+        $root = self::projectRoot();
+        $dataEnv = self::get('POETRY_DATA_PATH', './data') ?? './data';
+        if (str_starts_with($dataEnv, '/') || preg_match('/^[A-Za-z]:[\\\\\\/]/', $dataEnv) === 1) {
+            return realpath($dataEnv) ?: $dataEnv;
+        }
+
+        $path = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $dataEnv);
+
+        return realpath($path) ?: $path;
+    }
 }

@@ -2,6 +2,7 @@
 .env
 /var/
 /storage/
+/data/
 public/.user.ini
 *.sql
 !sql/*.sql

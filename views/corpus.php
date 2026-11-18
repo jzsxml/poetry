@@ -30,7 +30,7 @@ View::layoutStart($corpus['name'] . ' · ' . Site::NAME, ['/assets/corpus.js']);
   </header>
 
 <?php if (empty($corpus['inDb'])): ?>
-  <p class="corpus-item__hint">该卷尚未写入数据库。请执行 <code>composer run migrate</code>。</p>
+  <p class="corpus-item__hint">该卷尚未写入数据库。请执行 <code>composer run import</code>。</p>
 <?php else: ?>
   <div class="chip-row corpus-item__segments" id="corpus-segments"></div>
   <p class="status-text status-text--error" id="corpus-error" hidden></p>
